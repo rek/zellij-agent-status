@@ -134,6 +134,27 @@ fn badge(icon: &str, n: usize, total: usize) -> String {
     }
 }
 
+/// Remove trailing badges in our icons: `dev ⏳ ⏳ 🔔2` -> `dev`. Labels painted
+/// by another instance, or left over from before a restart, then can't stack.
+pub fn strip_badges<'a>(name: &'a str, icons: &Icons) -> &'a str {
+    let mut rest = name.trim_end();
+    loop {
+        let Some((head, last)) = rest.rsplit_once(' ') else {
+            return rest;
+        };
+        let is_badge = [&icons.waiting, &icons.working, &icons.done]
+            .iter()
+            .any(|i| {
+                last.strip_prefix(i.as_str())
+                    .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+            });
+        if !is_badge || head.trim_end().is_empty() {
+            return rest;
+        }
+        rest = head.trim_end();
+    }
+}
+
 /// `dev 🔔1 ⏳2`; a lone agent gets no count: `dev ⏳`.
 pub fn compose_label(base: &str, c: &Counts, icons: &Icons) -> String {
     format!(
@@ -161,16 +182,16 @@ pub struct TabNames {
 }
 
 impl TabNames {
-    pub fn base_for(&self, tab: TabId, current: &str) -> String {
+    pub fn base_for(&self, tab: TabId, current: &str, icons: &Icons) -> String {
         match self.tabs.get(&tab) {
             Some(p) if p.base == current || p.labels.contains(current) => p.base.clone(),
-            _ => current.to_string(),
+            _ => strip_badges(current, icons).to_string(),
         }
     }
 
     /// True when `label` still needs to be sent to zellij.
     pub fn needs_rename(&self, tab: TabId, label: &str, current: &str) -> bool {
-        label != current && self.tabs.get(&tab).map_or(true, |p| p.last != label)
+        label != current && self.tabs.get(&tab).is_none_or(|p| p.last != label)
     }
 
     pub fn painted(&mut self, tab: TabId, base: &str, label: &str) {
@@ -283,9 +304,10 @@ mod tests {
     #[test]
     fn manual_rename_becomes_new_base() {
         let mut n = TabNames::default();
+        let i = Icons::default();
         n.painted(0, "dev", "dev 🔔");
-        assert_eq!(n.base_for(0, "dev 🔔"), "dev");
-        assert_eq!(n.base_for(0, "api"), "api");
+        assert_eq!(n.base_for(0, "dev 🔔", &i), "dev");
+        assert_eq!(n.base_for(0, "api", &i), "api");
     }
 
     #[test]
@@ -294,9 +316,22 @@ mod tests {
         let mut n = TabNames::default();
         n.painted(1, "work", "work 🔔");
         n.painted(1, "work", "work 🔔1 ⏳1");
-        assert_eq!(n.base_for(1, "work 🔔"), "work");
-        assert_eq!(n.base_for(1, "work 🔔1 ⏳1"), "work");
-        assert_eq!(n.base_for(1, "work"), "work");
+        let i = Icons::default();
+        assert_eq!(n.base_for(1, "work 🔔", &i), "work");
+        assert_eq!(n.base_for(1, "work 🔔1 ⏳1", &i), "work");
+        assert_eq!(n.base_for(1, "work", &i), "work");
+    }
+
+    #[test]
+    fn foreign_labels_do_not_stack_badges() {
+        // another instance (or a previous run) painted these; we never saw them
+        let n = TabNames::default();
+        let i = Icons::default();
+        assert_eq!(n.base_for(2, "valkeet ⏳ ⏳ ⏳ ⏳", &i), "valkeet");
+        assert_eq!(n.base_for(2, "api 🔔1 ⏳2 ✅1", &i), "api");
+        // a name made only of an icon, or with an icon inside a word, is kept
+        assert_eq!(strip_badges("⏳", &i), "⏳");
+        assert_eq!(strip_badges("a ⏳x", &i), "a ⏳x");
     }
 
     #[test]

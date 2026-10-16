@@ -174,7 +174,7 @@ impl State {
             .pane_tab
             .get(&pane)
             .and_then(|t| self.tabs.iter().find(|x| x.tab_id == *t))
-            .map(|t| self.names.base_for(t.tab_id, &t.name))
+            .map(|t| self.names.base_for(t.tab_id, &t.name, &self.icons))
             .unwrap_or_else(|| "tab".into());
         let body = if state == AgentState::Waiting {
             "needs your input"
@@ -235,7 +235,7 @@ impl State {
                 .filter(|(p, _)| self.pane_tab.get(p) == Some(&tab.tab_id))
                 .map(|(_, s)| s);
             let counts = count(states);
-            let base = self.names.base_for(tab.tab_id, &tab.name);
+            let base = self.names.base_for(tab.tab_id, &tab.name, &self.icons);
             let label = compose_label(&base, &counts, &self.icons);
             if self.names.needs_rename(tab.tab_id, &label, &tab.name) {
                 rename_tab_with_id(tab.tab_id as u64, &label);
