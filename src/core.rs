@@ -148,7 +148,7 @@ pub fn strip_badges<'a>(name: &'a str, icons: &Icons) -> &'a str {
                 last.strip_prefix(i.as_str())
                     .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
             });
-        if !is_badge || head.trim_end().is_empty() {
+        if !is_badge {
             return rest;
         }
         rest = head.trim_end();
@@ -185,7 +185,11 @@ impl TabNames {
     pub fn base_for(&self, tab: TabId, current: &str, icons: &Icons) -> String {
         match self.tabs.get(&tab) {
             Some(p) if p.base == current || p.labels.contains(current) => p.base.clone(),
-            _ => strip_badges(current, icons).to_string(),
+            // zellij reports an empty name mid-rename; never adopt that as a base
+            prev => match strip_badges(current, icons) {
+                "" => prev.map_or_else(|| current.trim().to_string(), |p| p.base.clone()),
+                base => base.to_string(),
+            },
         }
     }
 
@@ -329,9 +333,20 @@ mod tests {
         let i = Icons::default();
         assert_eq!(n.base_for(2, "valkeet ⏳ ⏳ ⏳ ⏳", &i), "valkeet");
         assert_eq!(n.base_for(2, "api 🔔1 ⏳2 ✅1", &i), "api");
-        // a name made only of an icon, or with an icon inside a word, is kept
-        assert_eq!(strip_badges("⏳", &i), "⏳");
+        // an icon inside a word is kept
         assert_eq!(strip_badges("a ⏳x", &i), "a ⏳x");
+    }
+
+    #[test]
+    fn empty_or_badge_only_names_keep_the_old_base() {
+        // mid-rename zellij reports "", and we then see our own " ⏳" on it
+        let mut n = TabNames::default();
+        let i = Icons::default();
+        n.painted(3, "valkeet", "valkeet ⏳");
+        assert_eq!(n.base_for(3, "", &i), "valkeet");
+        assert_eq!(n.base_for(3, " ⏳ ⏳", &i), "valkeet");
+        // a tab we have never painted keeps whatever it is called
+        assert_eq!(n.base_for(4, "⏳", &i), "⏳");
     }
 
     #[test]

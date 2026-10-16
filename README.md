@@ -182,6 +182,8 @@ and adds the jump key and per-pane focus clearing.
   second instance. Each took the other's label for a manual rename and added a badge,
   forever. Since 0.1.1 the base name drops any trailing badges in the plugin's own
   icons, so instances (and leftovers from a restart) converge instead.
+- Zellij reports a tab's name as empty for a moment during a rename. An empty or
+  badge-only name is never adopted as the base; the previous base is kept.
 
 ## Open questions
 
