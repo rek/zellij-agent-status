@@ -9,7 +9,7 @@
 ![license MIT](https://img.shields.io/badge/license-MIT-blue)
 ![status alpha](https://img.shields.io/badge/status-alpha-orange)
 
-<img src="assets/tabbar.svg" alt="Tabs with agent badges: dev ⏳, api 🔔1 ⏳2, docs ✅, notes" width="760">
+<img src="assets/tabbar.svg" alt="Tabs with agent badges: dev ⏳, api 🔔 ⏳2, docs ✅, notes" width="760">
 
 </div>
 
@@ -24,8 +24,9 @@ there is no polling, no state files and no shelling out.
 
 ## What you get
 
-- **Per-pane state, per-tab summary.** 1–4 agents in one tab: `api 🔔1 ⏳2`. A
-  lone agent gets no count: `dev ⏳`.
+- **Per-pane state, per-tab summary.** Several agents in one tab:
+  `api 🔔 ⏳2` (one waiting, two working). A count appears only when more
+  than one agent shares a state.
 - **Alerts clear when you look.** Focusing the pane acknowledges it, not just
   the tab.
 - **Jump key.** One keypress focuses the next waiting pane (then finished

@@ -93,7 +93,6 @@ pub struct Counts {
     pub waiting: usize,
     pub working: usize,
     pub done: usize,
-    pub total: usize,
 }
 
 pub fn count(states: impl Iterator<Item = AgentState>) -> Counts {
@@ -105,7 +104,6 @@ pub fn count(states: impl Iterator<Item = AgentState>) -> Counts {
             AgentState::Done => c.done += 1,
             AgentState::Idle => {}
         }
-        c.total += 1;
     }
     c
 }
@@ -126,11 +124,11 @@ impl Default for Icons {
     }
 }
 
-fn badge(icon: &str, n: usize, total: usize) -> String {
-    match (n, total) {
-        (0, _) => String::new(),
-        (_, t) if t > 1 => format!(" {icon}{n}"),
-        _ => format!(" {icon}"),
+fn badge(icon: &str, n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => format!(" {icon}"),
+        _ => format!(" {icon}{n}"),
     }
 }
 
@@ -155,13 +153,13 @@ pub fn strip_badges<'a>(name: &'a str, icons: &Icons) -> &'a str {
     }
 }
 
-/// `dev 🔔1 ⏳2`; a lone agent gets no count: `dev ⏳`.
+/// `dev 🔔 ⏳2`: a count only when more than one agent shares the state.
 pub fn compose_label(base: &str, c: &Counts, icons: &Icons) -> String {
     format!(
         "{base}{}{}{}",
-        badge(&icons.waiting, c.waiting, c.total),
-        badge(&icons.working, c.working, c.total),
-        badge(&icons.done, c.done, c.total),
+        badge(&icons.waiting, c.waiting),
+        badge(&icons.working, c.working),
+        badge(&icons.done, c.done),
     )
 }
 
@@ -281,7 +279,9 @@ mod tests {
             ]
             .into_iter(),
         );
-        assert_eq!(compose_label("dev", &many, &icons), "dev 🔔1 ⏳2");
+        assert_eq!(compose_label("dev", &many, &icons), "dev 🔔 ⏳2");
+        let mixed = count([AgentState::Working, AgentState::Done].into_iter());
+        assert_eq!(compose_label("dev", &mixed, &icons), "dev ⏳ ✅");
         assert_eq!(
             compose_label("dev", &count(std::iter::empty()), &icons),
             "dev"
@@ -289,9 +289,9 @@ mod tests {
     }
 
     #[test]
-    fn idle_agents_add_no_badge_but_count_toward_total() {
+    fn idle_agents_add_no_badge() {
         let c = count([AgentState::Idle, AgentState::Waiting].into_iter());
-        assert_eq!(compose_label("t", &c, &Icons::default()), "t 🔔1");
+        assert_eq!(compose_label("t", &c, &Icons::default()), "t 🔔");
     }
 
     #[test]
