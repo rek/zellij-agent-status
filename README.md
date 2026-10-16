@@ -18,9 +18,11 @@ track of which one is stuck on a permission prompt. This plugin puts each
 agent's state on its tab. Zellij pushes tab and pane events to the plugin, so
 there is no polling, no state files and no shelling out.
 
-> **Status: alpha.** The core logic is unit-tested and the plugin compiles to
-> wasm, but it has not yet had a full run in a live session. Expect rough edges
-> and please open issues.
+> **Status: alpha.** Verified in a live zellij 0.45.1 session: per-pane states,
+> tab summaries, notifications-on-unfocused, the jump and focus-clear all work
+> (driven with `zellij pipe`). Not yet verified: the `MessagePlugin` keybind
+> (the jump was tested through a pipe) and real Claude Code hooks. Expect rough
+> edges and please open issues.
 
 ## What you get
 
@@ -72,8 +74,9 @@ bind "Alt a" {
 }
 ```
 
-Approve the permission prompt on first load (read and change application
-state, run commands for notifications).
+Approve the permission prompt on first load. It asks for: read application
+state (tabs and panes), change application state (rename tabs, focus panes),
+run commands (`notify-send`) and read CLI pipes (to release hook pipes).
 
 ## Wire up Claude Code
 
@@ -88,9 +91,12 @@ different state:
 | `SessionEnd` | `end` |
 
 ```sh
-zellij pipe --plugin "file:$HOME/.config/zellij/plugins/zellij-agent-status.wasm" \
-  --name agent-status -- "$ZELLIJ_PANE_ID:waiting"
+zellij pipe --name agent-status -- "$ZELLIJ_PANE_ID:waiting"
 ```
+
+No `--plugin` flag on purpose: it broadcasts to running plugins, so it reaches
+the instance started by `load_plugins`. With `--plugin file:…` zellij matches
+on the plugin's configuration too, and tries to start a second instance.
 
 A hook-installer subcommand is on the roadmap.
 
@@ -100,6 +106,9 @@ A hook-installer subcommand is on the roadmap.
 |---|---|---|
 | `agent-status` | `<pane_id>:<working\|waiting\|done\|idle\|end>` | set a pane's state |
 | `agent-status-jump` | none | focus the next waiting (then done) pane |
+
+From a shell, close stdin for the jump (`zellij pipe --name agent-status-jump </dev/null`),
+or `zellij pipe` waits for input. The keybind does not have that problem.
 
 `<pane_id>` is `$ZELLIJ_PANE_ID`; `terminal_7` is accepted too.
 
@@ -129,17 +138,28 @@ and adds the jump key and per-pane focus clearing.
 
 ## Roadmap
 
-- [ ] Live-session verification, and a comparison with the shell-script version
+- [x] Live-session verification of states, labels, jump and focus-clear
+- [ ] Verify the `MessagePlugin` keybind and real Claude Code hooks
 - [ ] Hook-installer subcommand
 - [ ] Test seam over the zellij calls so `plugin.rs` is covered
 - [ ] Optional own tab-bar rendering (badges without renaming)
 - [ ] Tagged releases with prebuilt wasm
 
+## Lessons from the first live run
+
+- Zellij runs plugins as programs, so the crate is a **binary** (`main`), not a `cdylib`.
+- A CLI pipe blocks its caller until the plugin releases it (`unblock_cli_pipe_input`,
+  by pipe id, needs the `ReadCliPipes` permission). A hook would otherwise hang.
+- Rename events land late, so zellij can report an older label; the plugin
+  remembers every label it painted and never mistakes one for a manual rename.
+- When a tab becomes active, zellij briefly reports the *previous* focused pane
+  there. A jump claims its destination so it cannot acknowledge the wrong pane.
+- Pane updates can arrive before tab updates, so the pane-to-tab map is rebuilt on both.
+
 ## Open questions
 
-- Whether `zellij pipe --plugin file:…` reaches the instance started by
-  `load_plugins` or starts a second one.
-- Hook latency of `zellij pipe` startup on busy sessions.
+- Hook latency of `zellij pipe` on busy sessions.
+- Behavior with several clients attached to one session.
 
 ## License
 

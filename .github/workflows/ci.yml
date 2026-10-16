@@ -17,4 +17,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: zellij-agent-status.wasm
-          path: target/wasm32-wasip1/release/zellij_agent_status.wasm
+          path: target/wasm32-wasip1/release/zellij-agent-status.wasm

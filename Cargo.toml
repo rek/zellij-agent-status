@@ -7,9 +7,6 @@ license = "MIT"
 repository = "https://github.com/rek/zellij-agent-status"
 keywords = ["zellij", "plugin", "claude-code", "ai-agents"]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
 zellij-tile = "0.45.1"
 

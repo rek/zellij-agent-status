@@ -1,9 +1,4 @@
-//! zellij-agent-status: per-pane AI agent state, summarised on tab names.
-//!
-//! `core` is pure and unit-tested on the host; `plugin` is the zellij glue
-//! and only exists on the wasm target.
+//! zellij-agent-status core: pure agent-state logic, testable on the host.
+//! The zellij glue lives in the binary (`main.rs`, wasm only).
 
 pub mod core;
-
-#[cfg(target_family = "wasm")]
-mod plugin;

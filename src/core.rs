@@ -144,28 +144,53 @@ pub fn compose_label(base: &str, c: &Counts, icons: &Icons) -> String {
     )
 }
 
+struct Painted {
+    base: String,
+    /// every label we have painted over this base; renames land late, so a
+    /// tab may still report an older one of these
+    labels: HashSet<String>,
+    last: String,
+}
+
 /// Remembers what name the user gave a tab versus what we painted on it, so
-/// a manual rename is adopted as the new base and badges never stack.
+/// a manual rename is adopted as the new base and badges never stack, even
+/// when zellij reports stale names while several renames are in flight.
 #[derive(Default)]
 pub struct TabNames {
-    painted: HashMap<TabId, (String, String)>, // tab -> (base, label)
+    tabs: HashMap<TabId, Painted>,
 }
 
 impl TabNames {
     pub fn base_for(&self, tab: TabId, current: &str) -> String {
-        match self.painted.get(&tab) {
-            Some((base, label)) if label == current => base.clone(),
+        match self.tabs.get(&tab) {
+            Some(p) if p.base == current || p.labels.contains(current) => p.base.clone(),
             _ => current.to_string(),
         }
     }
 
+    /// True when `label` still needs to be sent to zellij.
+    pub fn needs_rename(&self, tab: TabId, label: &str, current: &str) -> bool {
+        label != current && self.tabs.get(&tab).map_or(true, |p| p.last != label)
+    }
+
     pub fn painted(&mut self, tab: TabId, base: &str, label: &str) {
-        if base == label {
-            self.painted.remove(&tab);
-        } else {
-            self.painted
-                .insert(tab, (base.to_string(), label.to_string()));
+        let entry = self.tabs.entry(tab).or_insert_with(|| Painted {
+            base: base.to_string(),
+            labels: HashSet::new(),
+            last: base.to_string(),
+        });
+        if entry.base != base {
+            *entry = Painted {
+                base: base.to_string(),
+                labels: HashSet::new(),
+                last: base.to_string(),
+            };
         }
+        if entry.labels.len() > 16 {
+            entry.labels.clear();
+        }
+        entry.labels.insert(label.to_string());
+        entry.last = label.to_string();
     }
 }
 
@@ -261,6 +286,26 @@ mod tests {
         n.painted(0, "dev", "dev 🔔");
         assert_eq!(n.base_for(0, "dev 🔔"), "dev");
         assert_eq!(n.base_for(0, "api"), "api");
+    }
+
+    #[test]
+    fn stale_names_do_not_stack_badges() {
+        // two renames in flight; zellij first reports the older label
+        let mut n = TabNames::default();
+        n.painted(1, "work", "work 🔔");
+        n.painted(1, "work", "work 🔔1 ⏳1");
+        assert_eq!(n.base_for(1, "work 🔔"), "work");
+        assert_eq!(n.base_for(1, "work 🔔1 ⏳1"), "work");
+        assert_eq!(n.base_for(1, "work"), "work");
+    }
+
+    #[test]
+    fn does_not_resend_a_rename_already_in_flight() {
+        let mut n = TabNames::default();
+        assert!(n.needs_rename(1, "work 🔔", "work"));
+        n.painted(1, "work", "work 🔔");
+        assert!(!n.needs_rename(1, "work 🔔", "work")); // not applied yet
+        assert!(n.needs_rename(1, "work", "work 🔔")); // clearing the badge
     }
 
     #[test]

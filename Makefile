@@ -1,4 +1,4 @@
-WASM := target/wasm32-wasip1/release/zellij_agent_status.wasm
+WASM := target/wasm32-wasip1/release/zellij-agent-status.wasm
 DEST := $(HOME)/.config/zellij/plugins/zellij-agent-status.wasm
 
 .PHONY: build test install

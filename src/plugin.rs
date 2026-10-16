@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use zellij_tile::prelude::*;
 
-use crate::core::*;
+use zellij_agent_status::core::*;
 
 /// `zellij pipe --name agent-status -- "<pane_id>:<state>"`
 const PIPE_STATE: &str = "agent-status";
@@ -10,14 +10,17 @@ const PIPE_STATE: &str = "agent-status";
 const PIPE_JUMP: &str = "agent-status-jump";
 
 #[derive(Default)]
-struct State {
+pub struct State {
     tracker: Tracker,
     names: TabNames,
     icons: Icons,
     notify_on: HashSet<AgentState>,
     permitted: bool,
+    /// pane a jump is heading to; until it has focus, other panes must not be acknowledged
+    pending_jump: Option<PaneNum>,
     renaming: bool,
     tabs: Vec<TabInfo>,
+    manifest: PaneManifest,
     /// terminal pane id -> tab id
     pane_tab: HashMap<PaneNum, TabId>,
     /// every terminal pane in (tab position, pane id) order
@@ -25,8 +28,6 @@ struct State {
     /// focused terminal pane per tab id
     focused: HashMap<TabId, PaneNum>,
 }
-
-register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, config: BTreeMap<String, String>) {
@@ -42,16 +43,18 @@ impl ZellijPlugin for State {
             .filter_map(AgentState::parse)
             .collect();
 
-        request_permission(&[
-            PermissionType::ReadApplicationState,
-            PermissionType::ChangeApplicationState,
-            PermissionType::RunCommands,
-        ]);
         subscribe(&[
             EventType::TabUpdate,
             EventType::PaneUpdate,
             EventType::ModeUpdate,
             EventType::PermissionRequestResult,
+            EventType::Timer,
+        ]);
+        request_permission(&[
+            PermissionType::ReadApplicationState,
+            PermissionType::ChangeApplicationState,
+            PermissionType::RunCommands,
+            PermissionType::ReadCliPipes,
         ]);
         set_selectable(false);
     }
@@ -62,6 +65,10 @@ impl ZellijPlugin for State {
                 self.permitted = true;
                 self.sync();
             }
+            Event::Timer(_) => {
+                self.pending_jump = None;
+                self.sync();
+            }
             Event::ModeUpdate(info) => {
                 let was = self.renaming;
                 self.renaming = matches!(info.mode, InputMode::RenameTab | InputMode::RenamePane);
@@ -70,11 +77,18 @@ impl ZellijPlugin for State {
                 }
             }
             Event::TabUpdate(tabs) => {
+                // tab events only arrive once ReadApplicationState is granted
+                self.permitted = true;
                 self.tabs = tabs;
+                // pane->tab mapping needs tab positions, which may arrive after panes
+                let manifest = self.manifest.clone();
+                self.ingest_panes(&manifest);
                 self.sync();
             }
             Event::PaneUpdate(manifest) => {
+                self.permitted = true;
                 self.ingest_panes(&manifest);
+                self.manifest = manifest;
                 self.sync();
             }
             _ => {}
@@ -83,6 +97,10 @@ impl ZellijPlugin for State {
     }
 
     fn pipe(&mut self, msg: PipeMessage) -> bool {
+        // A CLI pipe blocks its caller (a Claude hook!) until the plugin releases it.
+        if let PipeSource::Cli(pipe_id) = &msg.source {
+            unblock_cli_pipe_input(pipe_id);
+        }
         match msg.name.as_str() {
             PIPE_JUMP => self.jump(),
             PIPE_STATE => {
@@ -175,11 +193,13 @@ impl State {
         );
     }
 
-    fn jump(&self) {
+    fn jump(&mut self) {
         let current = self
             .visible_pane()
             .and_then(|p| self.pane_tab.get(&p).map(|t| (*t, p)));
         if let Some((_, pane)) = jump_target(&self.order, &self.tracker, current) {
+            self.pending_jump = Some(pane);
+            set_timeout(2.0);
             focus_pane_with_id(PaneId::Terminal(pane), false, false);
         }
     }
@@ -194,7 +214,16 @@ impl State {
             self.tracker.retain_alive(&alive);
         }
         if let Some(p) = self.visible_pane() {
-            self.tracker.acknowledge(p);
+            match self.pending_jump {
+                None => {
+                    self.tracker.acknowledge(p);
+                }
+                Some(target) if target == p => {
+                    self.tracker.acknowledge(p);
+                    self.pending_jump = None;
+                }
+                Some(_) => {} // still travelling: the pane shown is not the destination
+            }
         }
         if self.renaming {
             return; // don't clobber a rename in progress
@@ -208,7 +237,7 @@ impl State {
             let counts = count(states);
             let base = self.names.base_for(tab.tab_id, &tab.name);
             let label = compose_label(&base, &counts, &self.icons);
-            if label != tab.name {
+            if self.names.needs_rename(tab.tab_id, &label, &tab.name) {
                 rename_tab_with_id(tab.tab_id as u64, &label);
             }
             self.names.painted(tab.tab_id, &base, &label);
