@@ -1,0 +1,17 @@
+[package]
+name = "zellij-agent-status"
+version = "0.1.0"
+edition = "2021"
+description = "Zellij plugin: per-pane AI agent state (working/waiting/done) summarised on tab names"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zellij-tile = "0.45.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
