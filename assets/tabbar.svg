@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 150" role="img" aria-label="Illustration of a zellij tab bar with agent badges">
+  <rect width="880" height="150" rx="12" fill="#14161f"/>
+  <text x="24" y="30" fill="#6b7089" font-family="ui-monospace,monospace" font-size="13">illustration</text>
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17">
+    <rect x="24" y="48" width="150" height="38" rx="6" fill="#2a2e42"/>
+    <text x="42" y="73" fill="#c0c6e8">dev ⏳</text>
+    <rect x="184" y="48" width="170" height="38" rx="6" fill="#3a2a2a"/>
+    <text x="202" y="73" fill="#ffd3c4">api 🔔1 ⏳2</text>
+    <rect x="364" y="48" width="140" height="38" rx="6" fill="#26332b"/>
+    <text x="382" y="73" fill="#c5efd2">docs ✅</text>
+    <rect x="514" y="48" width="110" height="38" rx="6" fill="#1d2030"/>
+    <text x="532" y="73" fill="#6b7089">notes</text>
+  </g>
+  <g font-family="system-ui,sans-serif" font-size="13" fill="#8a90ad">
+    <text x="42" y="116">one agent working</text>
+    <text x="202" y="116">1 waiting on you, 2 working</text>
+    <text x="382" y="116">finished, unseen</text>
+    <text x="532" y="116">no agents</text>
+  </g>
+</svg>

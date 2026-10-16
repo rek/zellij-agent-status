@@ -118,7 +118,11 @@ pub struct Icons {
 
 impl Default for Icons {
     fn default() -> Self {
-        Self { waiting: "🔔".into(), working: "⏳".into(), done: "✅".into() }
+        Self {
+            waiting: "🔔".into(),
+            working: "⏳".into(),
+            done: "✅".into(),
+        }
     }
 }
 
@@ -159,7 +163,8 @@ impl TabNames {
         if base == label {
             self.painted.remove(&tab);
         } else {
-            self.painted.insert(tab, (base.to_string(), label.to_string()));
+            self.painted
+                .insert(tab, (base.to_string(), label.to_string()));
         }
     }
 }
@@ -183,9 +188,12 @@ pub fn jump_target(
         let start = current
             .and_then(|c| order.iter().position(|x| *x == c))
             .map_or(0, |i| i + 1);
-        let after = hits
-            .iter()
-            .find(|h| order.iter().position(|x| x == *h).is_some_and(|i| i >= start));
+        let after = hits.iter().find(|h| {
+            order
+                .iter()
+                .position(|x| x == *h)
+                .is_some_and(|i| i >= start)
+        });
         return after.or(hits.first()).copied();
     }
     None
@@ -197,8 +205,14 @@ mod tests {
 
     #[test]
     fn parses_commands() {
-        assert_eq!(parse_command("3:waiting"), Some(Command::Set(3, AgentState::Waiting)));
-        assert_eq!(parse_command("terminal_7:completed"), Some(Command::Set(7, AgentState::Done)));
+        assert_eq!(
+            parse_command("3:waiting"),
+            Some(Command::Set(3, AgentState::Waiting))
+        );
+        assert_eq!(
+            parse_command("terminal_7:completed"),
+            Some(Command::Set(7, AgentState::Done))
+        );
         assert_eq!(parse_command("3:end"), Some(Command::End(3)));
         assert_eq!(parse_command("x:working"), None);
         assert_eq!(parse_command("3:bogus"), None);
@@ -209,9 +223,19 @@ mod tests {
         let icons = Icons::default();
         let one = count([AgentState::Working].into_iter());
         assert_eq!(compose_label("dev", &one, &icons), "dev ⏳");
-        let many = count([AgentState::Waiting, AgentState::Working, AgentState::Working].into_iter());
+        let many = count(
+            [
+                AgentState::Waiting,
+                AgentState::Working,
+                AgentState::Working,
+            ]
+            .into_iter(),
+        );
         assert_eq!(compose_label("dev", &many, &icons), "dev 🔔1 ⏳2");
-        assert_eq!(compose_label("dev", &count(std::iter::empty()), &icons), "dev");
+        assert_eq!(
+            compose_label("dev", &count(std::iter::empty()), &icons),
+            "dev"
+        );
     }
 
     #[test]

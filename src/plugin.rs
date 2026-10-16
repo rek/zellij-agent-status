@@ -37,7 +37,10 @@ impl ZellijPlugin for State {
             done: icon("done_icon", "✅"),
         };
         let notify = config.get("notify").map_or("waiting done", String::as_str);
-        self.notify_on = notify.split_whitespace().filter_map(AgentState::parse).collect();
+        self.notify_on = notify
+            .split_whitespace()
+            .filter_map(AgentState::parse)
+            .collect();
 
         request_permission(&[
             PermissionType::ReadApplicationState,
@@ -103,7 +106,9 @@ impl State {
         let mut positions: Vec<_> = manifest.panes.keys().copied().collect();
         positions.sort();
         for pos in positions {
-            let Some(&tab) = tab_by_pos.get(&pos) else { continue };
+            let Some(&tab) = tab_by_pos.get(&pos) else {
+                continue;
+            };
             let mut panes: Vec<&PaneInfo> = manifest.panes[&pos]
                 .iter()
                 .filter(|p| !p.is_plugin && !p.is_suppressed)
@@ -124,7 +129,8 @@ impl State {
     }
 
     fn visible_pane(&self) -> Option<PaneNum> {
-        self.active_tab().and_then(|t| self.focused.get(&t).copied())
+        self.active_tab()
+            .and_then(|t| self.focused.get(&t).copied())
     }
 
     fn apply(&mut self, cmd: Command) {
@@ -152,9 +158,19 @@ impl State {
             .and_then(|t| self.tabs.iter().find(|x| x.tab_id == *t))
             .map(|t| self.names.base_for(t.tab_id, &t.name))
             .unwrap_or_else(|| "tab".into());
-        let body = if state == AgentState::Waiting { "needs your input" } else { "finished" };
+        let body = if state == AgentState::Waiting {
+            "needs your input"
+        } else {
+            "finished"
+        };
         run_command(
-            &["notify-send", "-a", "zellij", &format!("Agent: {tab}"), body],
+            &[
+                "notify-send",
+                "-a",
+                "zellij",
+                &format!("Agent: {tab}"),
+                body,
+            ],
             BTreeMap::new(),
         );
     }

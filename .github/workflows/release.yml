@@ -1,0 +1,16 @@
+name: release
+on:
+  push: { tags: ["v*"] }
+permissions: { contents: write }
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-wasip1 }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - run: cp target/wasm32-wasip1/release/zellij_agent_status.wasm zellij-agent-status.wasm
+      - uses: softprops/action-gh-release@v2
+        with: { files: zellij-agent-status.wasm, generate_release_notes: true }

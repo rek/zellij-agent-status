@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "Zellij plugin: per-pane AI agent state (working/waiting/done) summarised on tab names"
 license = "MIT"
+repository = "https://github.com/rek/zellij-agent-status"
+keywords = ["zellij", "plugin", "claude-code", "ai-agents"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
