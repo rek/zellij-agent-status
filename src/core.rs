@@ -37,27 +37,43 @@ pub enum Command {
     End(PaneNum),
 }
 
+/// Grok fires Stop a second time when the session tears down (`/exit`).
+/// Those reasons clear the pane; they are not a completed turn.
+pub fn stop_reason_is_teardown(reason: &str) -> bool {
+    matches!(reason.trim(), "shutdown" | "channel_closed")
+}
+
 pub fn parse_command(payload: &str) -> Option<Command> {
     let (pane, word) = payload.split_once(':')?;
     let pane: PaneNum = pane.trim().trim_start_matches("terminal_").parse().ok()?;
-    if word.trim() == "end" || word.trim() == "cleanup" {
-        return Some(Command::End(pane));
+    match word.trim() {
+        "end" | "cleanup" | "exit" | "shutdown" | "channel_closed" => Some(Command::End(pane)),
+        other => AgentState::parse(other).map(|s| Command::Set(pane, s)),
     }
-    AgentState::parse(word).map(|s| Command::Set(pane, s))
 }
 
 #[derive(Default)]
 pub struct Tracker {
     panes: BTreeMap<PaneNum, AgentState>,
+    /// Panes that received `end`. A later `done` from Grok's teardown Stop
+    /// must not resurrect the ✅ after SessionEnd already cleared it.
+    ended: HashSet<PaneNum>,
 }
 
 impl Tracker {
     /// Returns true if the state actually changed.
     pub fn set(&mut self, pane: PaneNum, state: AgentState) -> bool {
+        if state == AgentState::Done && self.ended.contains(&pane) {
+            return false;
+        }
+        if !matches!(state, AgentState::Done) {
+            self.ended.remove(&pane);
+        }
         self.panes.insert(pane, state) != Some(state)
     }
 
     pub fn remove(&mut self, pane: PaneNum) -> bool {
+        self.ended.insert(pane);
         self.panes.remove(&pane).is_some()
     }
 
@@ -76,6 +92,9 @@ impl Tracker {
     pub fn acknowledge(&mut self, pane: PaneNum) -> bool {
         match self.panes.get(&pane) {
             Some(s) if s.is_alert() => {
+                if *s == AgentState::Done {
+                    self.ended.insert(pane);
+                }
                 self.panes.remove(&pane);
                 true
             }
@@ -262,8 +281,29 @@ mod tests {
             Some(Command::Set(7, AgentState::Done))
         );
         assert_eq!(parse_command("3:end"), Some(Command::End(3)));
+        assert_eq!(parse_command("terminal_7:exit"), Some(Command::End(7)));
+        assert_eq!(parse_command("3:shutdown"), Some(Command::End(3)));
         assert_eq!(parse_command("x:working"), None);
         assert_eq!(parse_command("3:bogus"), None);
+    }
+
+    #[test]
+    fn grok_exit_is_teardown_not_done() {
+        assert!(stop_reason_is_teardown("shutdown"));
+        assert!(stop_reason_is_teardown("channel_closed"));
+        assert!(!stop_reason_is_teardown("end_turn"));
+        assert!(!stop_reason_is_teardown(""));
+    }
+
+    #[test]
+    fn end_wins_over_a_later_done() {
+        let mut t = Tracker::default();
+        t.set(1, AgentState::Working);
+        assert!(t.remove(1));
+        assert!(!t.set(1, AgentState::Done));
+        assert_eq!(t.get(1), None);
+        assert!(t.set(1, AgentState::Working));
+        assert_eq!(t.get(1), Some(AgentState::Working));
     }
 
     #[test]
@@ -303,6 +343,15 @@ mod tests {
         assert!(!t.acknowledge(2));
         assert_eq!(t.get(1), None);
         assert_eq!(t.get(2), Some(AgentState::Working));
+    }
+
+    #[test]
+    fn acknowledging_done_ignores_a_later_done() {
+        let mut t = Tracker::default();
+        t.set(1, AgentState::Done);
+        assert!(t.acknowledge(1));
+        assert!(!t.set(1, AgentState::Done));
+        assert_eq!(t.get(1), None);
     }
 
     #[test]

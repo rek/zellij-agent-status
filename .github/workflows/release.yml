@@ -12,5 +12,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - run: cp target/wasm32-wasip1/release/zellij-agent-status.wasm zellij-agent-status.wasm
+      - run: cp scripts/install.sh install.sh
       - uses: softprops/action-gh-release@v2
-        with: { files: zellij-agent-status.wasm, generate_release_notes: true }
+        with:
+          files: |
+            zellij-agent-status.wasm
+            install.sh
+          generate_release_notes: true

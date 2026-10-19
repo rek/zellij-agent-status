@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use zellij_tile::prelude::*;
 
 use zellij_agent_status::core::*;
+use zellij_agent_status::installer;
 
 /// `zellij pipe --name agent-status -- "<pane_id>:<state>"`
 const PIPE_STATE: &str = "agent-status";
@@ -27,6 +28,8 @@ pub struct State {
     order: Vec<(TabId, PaneNum)>,
     /// focused terminal pane per tab id
     focused: HashMap<TabId, PaneNum>,
+    /// first-load Claude/Grok hook install has been kicked off
+    hooks_installed: bool,
 }
 
 impl ZellijPlugin for State {
@@ -63,6 +66,7 @@ impl ZellijPlugin for State {
         match event {
             Event::PermissionRequestResult(PermissionStatus::Granted) => {
                 self.permitted = true;
+                self.install_hooks();
                 self.sync();
             }
             Event::Timer(_) => {
@@ -79,6 +83,7 @@ impl ZellijPlugin for State {
             Event::TabUpdate(tabs) => {
                 // tab events only arrive once ReadApplicationState is granted
                 self.permitted = true;
+                self.install_hooks();
                 self.tabs = tabs;
                 // pane->tab mapping needs tab positions, which may arrive after panes
                 let manifest = self.manifest.clone();
@@ -87,6 +92,7 @@ impl ZellijPlugin for State {
             }
             Event::PaneUpdate(manifest) => {
                 self.permitted = true;
+                self.install_hooks();
                 self.ingest_panes(&manifest);
                 self.manifest = manifest;
                 self.sync();
@@ -115,6 +121,18 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    /// Write the hook script and merge it into `~/.claude/settings.json` once.
+    /// Idempotent: the shell no-ops when the version tag is already current.
+    fn install_hooks(&mut self) {
+        if self.hooks_installed {
+            return;
+        }
+        self.hooks_installed = true;
+        let mut ctx = BTreeMap::new();
+        ctx.insert("type".into(), "install_hooks".into());
+        run_command(&["sh", "-c", &installer::install_script()], ctx);
+    }
+
     fn ingest_panes(&mut self, manifest: &PaneManifest) {
         let tab_by_pos: HashMap<usize, TabId> =
             self.tabs.iter().map(|t| (t.position, t.tab_id)).collect();

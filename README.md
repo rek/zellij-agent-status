@@ -7,8 +7,6 @@
 [![ci](https://github.com/rek/zellij-agent-status/actions/workflows/ci.yml/badge.svg)](https://github.com/rek/zellij-agent-status/actions/workflows/ci.yml)
 ![zellij 0.45+](https://img.shields.io/badge/zellij-0.45%2B-8A2BE2)
 ![license MIT](https://img.shields.io/badge/license-MIT-blue)
-![status alpha](https://img.shields.io/badge/status-alpha-orange)
-
 <img src="assets/tabbar.svg" alt="Tabs with agent badges: dev ⏳, api 🔔 ⏳2, docs ✅, notes" width="760">
 
 </div>
@@ -18,9 +16,9 @@ track of which one is stuck on a permission prompt. This plugin puts each
 agent's state on its tab. Zellij pushes tab and pane events to the plugin, so
 there is no polling, no state files and no shelling out.
 
-> **Status: alpha.** In daily use on zellij 0.45.1 with real Claude Code hooks:
+> In daily use on zellij 0.45.1 with Claude Code and Grok Build hooks:
 > per-pane states, tab summaries, notifications-on-unfocused, the jump and
-> focus-clear all work. Expect rough edges and please open issues.
+> focus-clear all work. Please open issues if something is off.
 
 ## What you get
 
@@ -41,42 +39,64 @@ there is no polling, no state files and no shelling out.
 
 ## Install
 
-Download the prebuilt plugin from the latest release:
+Needs [Zellij](https://zellij.dev) 0.45+ and [jq](https://jqlang.github.io/jq)
+(the hook script uses it).
 
 ```sh
-mkdir -p ~/.config/zellij/plugins
-curl -fL -o ~/.config/zellij/plugins/zellij-agent-status.wasm \
-  https://github.com/rek/zellij-agent-status/releases/latest/download/zellij-agent-status.wasm
+curl -fsSL https://github.com/rek/zellij-agent-status/releases/latest/download/install.sh | sh
 ```
 
-Or build it yourself: `make install` (needs the `wasm32-wasip1` Rust target).
+That adds an `agent-status` alias and loads it in the background. Start a new
+zellij session, approve the permission prompt, and the plugin writes
+`~/.config/zellij/agent-status-hook.sh` plus Claude Code / Grok hooks in
+`~/.claude/settings.json`. Existing agent sessions need `/hooks`. The hook
+script is version-tagged; a newer plugin rewrites it.
 
-Load it in the background (`~/.config/zellij/config.kdl`). Zellij does not
-expand `~` in some plugin paths, so use an absolute path if it fails to load:
+Grok Build loads the same `~/.claude/settings.json` hooks. `/exit` fires Stop
+with `reason` `shutdown` or `channel_closed`; the hook maps those to `end` so
+the tab does not stick on ✅. `SessionEnd` also sends `end`.
 
-```kdl
-load_plugins {
-    "file:/home/you/.config/zellij/plugins/zellij-agent-status.wasm"
-}
-```
-
-Bind the jump key (inside `shared_except "locked"`):
+Optional jump key, inside `shared_except "locked"`:
 
 ```kdl
 bind "Alt a" {
-    MessagePlugin "file:/home/you/.config/zellij/plugins/zellij-agent-status.wasm" {
+    MessagePlugin "agent-status" {
         name "agent-status-jump"
     }
 }
 ```
 
-> **Keep the two blocks' configuration identical.** Zellij finds the running
-> instance by URL *and* configuration. If they differ, the keybind starts a
-> second instance, and the two fight over tab names.
+Use that alias for the keybind too. Zellij finds the running instance by URL
+*and* configuration; a `file:` URL in one block and an `https:` URL in the
+other starts a second instance, and the two fight over tab names.
+
+To install by hand instead of the one-liner: `install.sh --print` shows the
+KDL. To build from source: `make install` (needs the `wasm32-wasip1` Rust
+target) and point the alias at
+`file:/home/you/.config/zellij/plugins/zellij-agent-status.wasm`. Zellij does
+not expand `~` in some plugin paths.
+
+### Update
+
+```sh
+curl -fsSL https://github.com/rek/zellij-agent-status/releases/latest/download/install.sh | sh -s -- --update
+```
+
+That drops Zellij's cached wasm and reloads the running plugin (or tells you
+to start a new session if you are not in one). Hook install runs again when
+the plugin version changed.
 
 ### Options
 
-All optional. If you set any, put the same lines in both blocks above.
+All optional. Set them on the alias, once:
+
+```kdl
+plugins {
+    agent-status location="https://github.com/rek/zellij-agent-status/releases/latest/download/zellij-agent-status.wasm" {
+        notify "waiting done"
+    }
+}
+```
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -85,50 +105,30 @@ All optional. If you set any, put the same lines in both blocks above.
 | `working_icon` | `"⏳"` | badge for an agent at work |
 | `done_icon` | `"✅"` | badge for an agent that finished |
 
-Approve the permission prompt on first load. It asks for: read application
-state (tabs and panes), change application state (rename tabs, focus panes),
-run commands (`notify-send`) and read CLI pipes (to release hook pipes).
+## What first-load registers
 
-## Wire up Claude Code
-
-Add hooks to `~/.claude/settings.json`. Each one runs the same command with a
-different state:
+Each hook runs `~/.config/zellij/agent-status-hook.sh` with a different state.
+The command stored in settings uses `${HOME}` so it is portable.
 
 | Hook | Matcher | State |
 |---|---|---|
 | `UserPromptSubmit`, `PostToolUse` | | `working` |
 | `Notification` | `permission_prompt\|elicitation_dialog` | `waiting` |
-| `Stop` | | `done` |
+| `Stop` | | `done`, or `end` on Grok `/exit` (`shutdown` / `channel_closed`) |
 | `SessionEnd` | | `end` |
 
 The `Notification` matcher matters. Without it, Claude Code's "idle for a
 while" reminder turns a finished ✅ back into 🔔 and sends a second toast.
 
-```json
-"Notification": [{
-  "matcher": "permission_prompt|elicitation_dialog",
-  "hooks": [{
-    "type": "command",
-    "command": "[ -z \"$ZELLIJ\" ] || timeout 2 zellij pipe --name agent-status -- \"$ZELLIJ_PANE_ID:waiting\" </dev/null >/dev/null 2>&1"
-  }]
-}]
-```
-
-The other hooks use the same command with their state. The guard makes it a
-no-op outside zellij. `timeout` and the closed stdin mean a missing plugin can
-never hang the agent.
-
-No `--plugin` flag on purpose: it broadcasts to running plugins, so it reaches
-the instance started by `load_plugins`. With `--plugin file:…` zellij matches
-on the plugin's configuration too, and tries to start a second instance.
-
-A hook-installer subcommand is on the roadmap.
+The hook is a no-op outside zellij. `timeout` and closed stdin mean a missing
+plugin can never hang the agent. No `--plugin` flag: the pipe broadcasts to
+running plugins, so it reaches the instance started by `load_plugins`.
 
 ## Protocol
 
 | Pipe name | Payload | Effect |
 |---|---|---|
-| `agent-status` | `<pane_id>:<working\|waiting\|done\|idle\|end>` | set a pane's state |
+| `agent-status` | `<pane_id>:<working\|waiting\|done\|idle\|end>` | set a pane's state (`exit` / `shutdown` / `channel_closed` also mean `end`) |
 | `agent-status-jump` | none | focus the next waiting (then done) pane |
 
 From a shell, close stdin for the jump (`zellij pipe --name agent-status-jump </dev/null`),
@@ -139,9 +139,10 @@ or `zellij pipe` waits for input. The keybind does not have that problem.
 ## How it works
 
 `src/core.rs` is pure logic (state, label composition, base-name memory, jump
-order) with no zellij types, so it is tested on the host. `src/plugin.rs` is the
-thin zellij layer. It tracks panes from `PaneUpdate`, tabs from `TabUpdate`,
-and repaints names with `rename_tab_with_id`.
+order) with no zellij types, so it is tested on the host. `src/installer.rs`
+builds the first-load hook script and the `settings.json` merge. `src/plugin.rs`
+is the thin zellij layer. It tracks panes from `PaneUpdate`, tabs from
+`TabUpdate`, and repaints names with `rename_tab_with_id`.
 
 ```sh
 make test      # core unit tests
@@ -165,7 +166,7 @@ and adds the jump key and per-pane focus clearing.
 - [x] Live-session verification of states, labels, jump and focus-clear
 - [x] Real Claude Code hooks
 - [x] Tagged releases with prebuilt wasm
-- [ ] Hook-installer subcommand
+- [x] First-load hook install (script + `~/.claude/settings.json`)
 - [ ] Test seam over the zellij calls so `plugin.rs` is covered
 - [ ] Optional own tab-bar rendering (badges without renaming)
 
@@ -181,8 +182,10 @@ and adds the jump key and per-pane focus clearing.
 - Pane updates can arrive before tab updates, so the pane-to-tab map is rebuilt on both.
 - A `MessagePlugin` keybind whose configuration differs from `load_plugins` starts a
   second instance. Each took the other's label for a manual rename and added a badge,
-  forever. Since 0.1.1 the base name drops any trailing badges in the plugin's own
-  icons, so instances (and leftovers from a restart) converge instead.
+  forever. A plugin alias (`plugins { agent-status location="…" }` plus
+  `MessagePlugin "agent-status"`) keeps both on the same instance. Since 0.1.1 the
+  base name drops any trailing badges in the plugin's own icons, so leftovers from a
+  restart converge instead.
 - Zellij reports a tab's name as empty for a moment during a rename. An empty or
   badge-only name is never adopted as the base; the previous base is kept.
 
