@@ -121,8 +121,13 @@ The `Notification` matcher matters. Without it, Claude Code's "idle for a
 while" reminder turns a finished ✅ back into 🔔 and sends a second toast.
 
 The hook is a no-op outside zellij. `timeout` and closed stdin mean a missing
-plugin can never hang the agent. No `--plugin` flag: the pipe broadcasts to
-running plugins, so it reaches the instance started by `load_plugins`.
+plugin can never hang the agent. By default the pipe carries no `--plugin`
+URL: it broadcasts, reaching the instance started by `load_plugins` however
+it is spelled. Machines that alias the plugin to a local wasm (see "To install
+by hand" above) can instead create `~/.config/zellij/agent-status-plugin.url`
+containing that exact URL: the hook then pipes to it alone, so a leftover
+copy under a different URL can never intercept — or be launched — by the
+pipe. The file is machine-local and never touched by the plugin.
 
 ## Protocol
 
@@ -199,7 +204,9 @@ Rules of thumb:
 - On first load the plugin writes `~/.config/zellij/agent-status-hook.sh`
   from its baked-in template and merges hooks into `~/.claude/settings.json`.
   A hand-customized hook script is therefore overwritten by the next version
-  bump; customize the template in `scripts/agent-status-hook.sh` instead.
+  bump. The one supported machine-local knob is the optional pin file
+  `~/.config/zellij/agent-status-plugin.url` — see "What first-load
+  registers"; anything else belongs in `scripts/agent-status-hook.sh`.
 
 ## Prior art
 

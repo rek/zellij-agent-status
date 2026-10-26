@@ -178,6 +178,7 @@ mod tests {
         assert_eq!(lines.next(), Some("#!/bin/sh"));
         assert_eq!(lines.next(), Some(HOOK_VERSION_TAG));
         assert!(body.contains("zellij pipe --name agent-status"));
+        assert!(body.contains("agent-status-plugin.url"));
         assert!(body.contains("shutdown|channel_closed"));
     }
 
