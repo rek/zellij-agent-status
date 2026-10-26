@@ -149,6 +149,58 @@ make test      # core unit tests
 make build     # wasm32-wasip1 release build
 ```
 
+## Development flow
+
+`make install` (build from source, copy into `~/.config/zellij/plugins/`) exists
+**only to test changes live before publishing**. It is not a way to run the
+plugin long-term: a locally built wasm and the CI release build are different
+artifacts, and a machine left on `make install` quietly runs code that was
+never published. This bit once: the machine was left on a local pre-release
+build, so what it ran and what GitHub had published silently diverged, and
+nobody could tell from the tab bar. Don't keep a local build installed after
+you're done testing.
+
+The full loop, start to finish:
+
+```sh
+make test      # core logic, runs on the host
+make install   # DEV ONLY: local build into ~/.config/zellij/plugins/
+
+# Zellij caches compiled plugins by URL — drop the cache or the old build
+# keeps running across restarts:
+find ~/.cache/zellij -name '*zellij-agent-status*' -prune -exec rm -rf {} +
+zellij action start-or-reload-plugin agent-status </dev/null
+
+# ...exercise it live: run the hook by hand for a visible badge flip, and
+# /hooks in a running agent to re-arm fresh hooks...
+
+# happy? publish. The version baked into the wasm and the hook's version tag
+# come from Cargo.toml, so bump it to the tag you are about to cut:
+$EDITOR Cargo.toml
+git add -A && git commit
+git tag vX.Y.Z && git push origin main --tags
+# the release workflow builds and publishes wasm + install.sh on the tag
+
+# then put the machine back on the published artifact — never leave the
+# local build in place:
+curl -fsSL https://github.com/rek/zellij-agent-status/releases/latest/download/install.sh | sh -s -- --update
+```
+
+Rules of thumb:
+
+- The machine always runs the **published release artifact**; `make install`
+  is a temporary test state, undone by the update one-liner.
+- Bump `Cargo.toml`'s `version` every release: the hook script's version tag
+  (`# zellij-agent-status vX.Y.Z`) is `CARGO_PKG_VERSION`, and the plugin only
+  rewrites a hook whose tag is older than itself.
+- Zellij caches compiled plugins by URL. Replacing the wasm file changes
+  nothing until the cache entry is dropped — that is what `--update` and the
+  `find` above do.
+- On first load the plugin writes `~/.config/zellij/agent-status-hook.sh`
+  from its baked-in template and merges hooks into `~/.claude/settings.json`.
+  A hand-customized hook script is therefore overwritten by the next version
+  bump; customize the template in `scripts/agent-status-hook.sh` instead.
+
 ## Prior art
 
 Built after surveying what exists, borrowing the good ideas:
