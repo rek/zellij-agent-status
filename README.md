@@ -247,6 +247,36 @@ and adds the jump key and per-pane focus clearing.
   restart converge instead.
 - Zellij reports a tab's name as empty for a moment during a rename. An empty or
   badge-only name is never adopted as the base; the previous base is kept.
+- `PaneInfo.is_focused` is per *layer*: a tab reports a focused tiled pane **and** a
+  focused floating pane, even while floating panes are hidden. Taking whichever came
+  last by pane id meant a hidden float could stand in for the agent pane, so its ✅
+  never cleared, only in tabs whose float had the higher id (fixed in 0.1.7). Only
+  the focused pane of the visible layer (`TabInfo.are_floating_panes_visible`) counts.
+
+## Troubleshooting a badge that won't clear
+
+A badge clears when the plugin thinks its pane is on screen. Check what zellij
+actually reports before reading code:
+
+```sh
+# every terminal pane: tab, id, layer, focus (look for two FOCUSED per tab)
+zellij action list-panes -a -j </dev/null | jq -r '.[] | select(.is_plugin|not)
+  | [.tab_name, .id, (if .is_floating then "float" else "tiled" end),
+     (if .is_focused then "FOCUSED" else "-" end)] | @tsv'
+# every agent-status instance: there must be exactly one (the alias)
+zellij action list-panes -a -j </dev/null | jq -c '.[] | select(.is_plugin)
+  | select(.plugin_url | test("agent-status")) | {id, plugin_url, tab_name}'
+# which build is running: compare with the release asset
+sha256sum ~/.config/zellij/plugins/zellij-agent-status.wasm
+```
+
+- **Two or more instances** (a stray `https://` or `file:` copy, often a floating
+  pane saved into the session) fight over tab names: close the extra one with
+  `zellij action close-pane --pane-id plugin_<id>`.
+- **It clears in some tabs but not others:** compare pane ids and layers in those
+  tabs; that is how the 0.1.7 hidden-float bug showed up.
+- To test acknowledgement, pipe `done` to a pane on a tab you're *not* looking at,
+  then visit it. Piping to the visible pane clears instantly, by design.
 
 ## Open questions
 

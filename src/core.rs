@@ -52,6 +52,13 @@ pub fn parse_command(payload: &str) -> Option<Command> {
     }
 }
 
+/// Zellij flags the focused pane of *each* layer (tiled and floating) as
+/// focused, even while the floating layer is hidden. Only the one in the
+/// visible layer is actually on screen.
+pub fn is_on_screen(is_focused: bool, is_floating: bool, floating_visible: bool) -> bool {
+    is_focused && is_floating == floating_visible
+}
+
 #[derive(Default)]
 pub struct Tracker {
     panes: BTreeMap<PaneNum, AgentState>,
@@ -293,6 +300,17 @@ mod tests {
         assert!(stop_reason_is_teardown("channel_closed"));
         assert!(!stop_reason_is_teardown("end_turn"));
         assert!(!stop_reason_is_teardown(""));
+    }
+
+    #[test]
+    fn hidden_floating_pane_is_not_on_screen() {
+        // floats hidden: the tiled pane is seen, the float's stale focus is not
+        assert!(is_on_screen(true, false, false));
+        assert!(!is_on_screen(true, true, false));
+        // floats shown: the float is seen, the tiled pane underneath is not
+        assert!(is_on_screen(true, true, true));
+        assert!(!is_on_screen(true, false, true));
+        assert!(!is_on_screen(false, false, false));
     }
 
     #[test]

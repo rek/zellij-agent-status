@@ -134,15 +134,18 @@ impl State {
     }
 
     fn ingest_panes(&mut self, manifest: &PaneManifest) {
-        let tab_by_pos: HashMap<usize, TabId> =
-            self.tabs.iter().map(|t| (t.position, t.tab_id)).collect();
+        let tab_by_pos: HashMap<usize, (TabId, bool)> = self
+            .tabs
+            .iter()
+            .map(|t| (t.position, (t.tab_id, t.are_floating_panes_visible)))
+            .collect();
         self.pane_tab.clear();
         self.order.clear();
         self.focused.clear();
         let mut positions: Vec<_> = manifest.panes.keys().copied().collect();
         positions.sort();
         for pos in positions {
-            let Some(&tab) = tab_by_pos.get(&pos) else {
+            let Some(&(tab, floating_visible)) = tab_by_pos.get(&pos) else {
                 continue;
             };
             let mut panes: Vec<&PaneInfo> = manifest.panes[&pos]
@@ -153,7 +156,7 @@ impl State {
             for p in panes {
                 self.pane_tab.insert(p.id, tab);
                 self.order.push((tab, p.id));
-                if p.is_focused {
+                if is_on_screen(p.is_focused, p.is_floating, floating_visible) {
                     self.focused.insert(tab, p.id);
                 }
             }

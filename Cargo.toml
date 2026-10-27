@@ -1,6 +1,6 @@
 [package]
 name = "zellij-agent-status"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Zellij plugin: per-pane AI agent state (working/waiting/done) summarised on tab names"
 license = "MIT"
