@@ -56,6 +56,11 @@ Grok Build loads the same `~/.claude/settings.json` hooks. `/exit` fires Stop
 with `reason` `shutdown` or `channel_closed`; the hook maps those to `end` so
 the tab does not stick on ✅. `SessionEnd` also sends `end`.
 
+[omp](https://github.com/can1357/oh-my-pi) never runs those hooks, so where
+`~/.omp/agent/` exists the plugin also writes an omp extension to
+`~/.omp/agent/extensions/agent-status.ts`. Restart omp to load it. See
+"omp" below.
+
 Optional jump key, inside `shared_except "locked"`:
 
 ```kdl
@@ -120,6 +125,25 @@ The command stored in settings uses `${HOME}` so it is portable.
 The `Notification` matcher matters. Without it, Claude Code's "idle for a
 while" reminder turns a finished ✅ back into 🔔 and sends a second toast.
 
+### omp
+
+omp gets an extension instead of hooks. It calls the same hook script, from
+these omp events:
+
+| omp event | State |
+|---|---|
+| `before_agent_start`, `tool_execution_end`, `tool_approval_resolved` | `working` |
+| `tool_approval_requested`, `tool_execution_start` of the `ask` tool | `waiting` |
+| `agent_end` (unless omp is about to continue) | `done` |
+| `session_shutdown` | `end` |
+
+Only the top-level agent reports. Subagents share the pane and are skipped,
+so a finished task does not flash ✅ mid-run. The file is version-tagged like
+the hook script and rewritten by a newer plugin; a same-named file that is
+not ours is left alone. Only omp's default profile is covered: for
+`omp --profile <name>`, copy the file into
+`~/.omp/profiles/<name>/agent/extensions/`.
+
 The hook is a no-op outside zellij. `timeout` and closed stdin mean a missing
 plugin can never hang the agent. By default the pipe carries no `--plugin`
 URL: it broadcasts, reaching the instance started by `load_plugins` however
@@ -145,7 +169,8 @@ or `zellij pipe` waits for input. The keybind does not have that problem.
 
 `src/core.rs` is pure logic (state, label composition, base-name memory, jump
 order) with no zellij types, so it is tested on the host. `src/installer.rs`
-builds the first-load hook script and the `settings.json` merge. `src/plugin.rs`
+builds the first-load hook script, the `settings.json` merge and the omp
+extension write. `src/plugin.rs`
 is the thin zellij layer. It tracks panes from `PaneUpdate`, tabs from
 `TabUpdate`, and repaints names with `rename_tab_with_id`.
 

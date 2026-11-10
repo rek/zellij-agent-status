@@ -1,4 +1,4 @@
-//! First-load Claude/Grok hook install. Pure std, so it is tested on the host.
+//! First-load Claude/Grok hook install, plus the omp extension. Pure std, so it is tested on the host.
 //! The wasm plugin runs the generated shell via `run_command`.
 
 /// Marker written into the hook script and checked before rewriting.
@@ -11,6 +11,19 @@ pub const HOOK_CMD: &str = "${HOME}/.config/zellij/agent-status-hook.sh";
 /// Host path the installer writes (relative to `$HOME`).
 pub const HOOK_REL_PATH: &str = ".config/zellij/agent-status-hook.sh";
 
+/// Marker written as the first line of the omp extension.
+pub const OMP_VERSION_TAG: &str = concat!("// zellij-agent-status v", env!("CARGO_PKG_VERSION"));
+
+/// Host path of the omp extension (relative to `$HOME`); omp loads every
+/// `.ts` file in this directory for the default profile.
+pub const OMP_EXT_REL_PATH: &str = ".omp/agent/extensions/agent-status.ts";
+
+/// omp extension source with the version tag as its first line.
+pub fn omp_extension_content() -> String {
+    let original = include_str!("../scripts/omp-agent-status.ts");
+    format!("{OMP_VERSION_TAG}\n{}", original.trim_end())
+}
+
 /// Hook script with a version tag inserted after the shebang.
 pub fn hook_script_content() -> String {
     let original = include_str!("../scripts/agent-status-hook.sh");
@@ -22,13 +35,17 @@ pub fn hook_script_content() -> String {
     }
 }
 
-/// Idempotent `sh -c` body: write the hook script, then merge Claude/Grok hooks.
+/// Idempotent `sh -c` body: write the omp extension (only where omp is set
+/// up), write the hook script, then merge Claude/Grok hooks.
 pub fn install_script() -> String {
     INSTALL_TEMPLATE
         .replace("__VERSION_TAG__", HOOK_VERSION_TAG)
         .replace("__HOOK_CMD__", HOOK_CMD)
         .replace("__HOOK_REL_PATH__", HOOK_REL_PATH)
+        .replace("__OMP_TAG__", OMP_VERSION_TAG)
+        .replace("__OMP_EXT_REL_PATH__", OMP_EXT_REL_PATH)
         .replace("__HOOK_SCRIPT__", &hook_script_content())
+        .replace("__OMP_EXTENSION__", &omp_extension_content())
 }
 
 const INSTALL_TEMPLATE: &str = r##"set -e
@@ -53,6 +70,22 @@ resolve_file_symlink() {
 # Resolve symlink so mv does not replace the link with a regular file
 if [ -L "$SETTINGS" ]; then
   SETTINGS="$(resolve_file_symlink "$SETTINGS")"
+fi
+
+# omp never runs settings.json hooks; it gets an extension that calls the hook
+# script. Written only where omp is set up, only when our copy is not current,
+# and never over a same-named file that is not ours. Best-effort: a failure
+# here must not stop the hook install below.
+OMP_EXT="$HOME/__OMP_EXT_REL_PATH__"
+if [ -d "$HOME/.omp/agent" ] && ! grep -qF '__OMP_TAG__' "$OMP_EXT" 2>/dev/null; then
+  if [ ! -e "$OMP_EXT" ] || grep -qF 'zellij-agent-status' "$OMP_EXT" 2>/dev/null; then
+    {
+      mkdir -p "$(dirname "$OMP_EXT")" &&
+      cat > "$OMP_EXT" << 'AGENT_STATUS_OMP_EOF'
+__OMP_EXTENSION__
+AGENT_STATUS_OMP_EOF
+    } || true
+  fi
 fi
 
 # Already current: same plugin version and our portable command is registered
@@ -193,6 +226,9 @@ mod tests {
         assert!(sh.contains("permission_prompt|elicitation_dialog"));
         assert!(sh.contains("SessionEnd"));
         assert!(sh.contains(r#""stop""#));
+        assert!(sh.contains(OMP_VERSION_TAG));
+        assert!(sh.contains("tool_approval_requested"));
+        assert!(!sh.contains("__OMP_"));
         assert!(!sh.contains("__HOOK_SCRIPT__"));
         assert!(!sh.contains("__VERSION_TAG__"));
     }
@@ -319,6 +355,47 @@ mod tests {
         let body = fs::read_to_string(&hook).unwrap();
         assert!(body.contains(HOOK_VERSION_TAG));
         assert!(!body.contains("v0.0.0"));
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn writes_the_omp_extension_only_where_omp_is_set_up() {
+        let without = unique_home();
+        run_install(&without);
+        assert!(!without.join(".omp").exists());
+        fs::remove_dir_all(&without).ok();
+
+        let home = unique_home();
+        fs::create_dir_all(home.join(".omp/agent")).unwrap();
+        run_install(&home);
+        let ext = home.join(OMP_EXT_REL_PATH);
+        let body = fs::read_to_string(&ext).unwrap();
+        assert_eq!(body.lines().next(), Some(OMP_VERSION_TAG));
+        assert!(body.contains("session_shutdown"));
+        assert!(body.contains("agent-status-hook.sh"));
+        assert!(body.ends_with("}\n"));
+
+        // Current copy is left alone, an older one is replaced.
+        let before = fs::metadata(&ext).unwrap().modified().unwrap();
+        run_install(&home);
+        assert_eq!(fs::metadata(&ext).unwrap().modified().unwrap(), before);
+        fs::write(&ext, "// zellij-agent-status v0.0.0\nold\n").unwrap();
+        run_install(&home);
+        assert!(fs::read_to_string(&ext).unwrap().contains(OMP_VERSION_TAG));
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn leaves_a_foreign_omp_extension_alone() {
+        let home = unique_home();
+        let ext = home.join(OMP_EXT_REL_PATH);
+        fs::create_dir_all(ext.parent().unwrap()).unwrap();
+        fs::write(&ext, "export default () => {};\n").unwrap();
+        run_install(&home);
+        assert_eq!(
+            fs::read_to_string(&ext).unwrap(),
+            "export default () => {};\n"
+        );
         fs::remove_dir_all(&home).ok();
     }
 }
