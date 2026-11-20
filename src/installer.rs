@@ -18,6 +18,30 @@ pub const OMP_VERSION_TAG: &str = concat!("// zellij-agent-status v", env!("CARG
 /// `.ts` file in this directory for the default profile.
 pub const OMP_EXT_REL_PATH: &str = ".omp/agent/extensions/agent-status.ts";
 
+/// Marker written after the shebang of the Hermes hook script.
+pub const HERMES_VERSION_TAG: &str = concat!(
+    "# zellij-agent-status v",
+    env!("CARGO_PKG_VERSION"),
+    " (hermes)"
+);
+
+/// Host path of the Hermes shell hook (relative to `$HOME`); `~/.hermes/agent-hooks/`
+/// is where Hermes keeps shell hooks by convention. Hermes registers it from its
+/// `hooks:` config block, behind its own first-use consent prompt.
+pub const HERMES_HOOK_REL_PATH: &str = ".hermes/agent-hooks/zellij-agent-status.sh";
+
+/// Hermes hook script with its version tag inserted after the shebang.
+pub fn hermes_hook_content() -> String {
+    let original = include_str!("../scripts/hermes-agent-status.sh");
+    match original.find('\n') {
+        Some(pos) => {
+            let (shebang, rest) = original.split_at(pos);
+            format!("{shebang}\n{HERMES_VERSION_TAG}{rest}")
+        }
+        None => original.to_string(),
+    }
+}
+
 /// omp extension source with the version tag as its first line.
 pub fn omp_extension_content() -> String {
     let original = include_str!("../scripts/omp-agent-status.ts");
@@ -46,6 +70,9 @@ pub fn install_script() -> String {
         .replace("__OMP_EXT_REL_PATH__", OMP_EXT_REL_PATH)
         .replace("__HOOK_SCRIPT__", &hook_script_content())
         .replace("__OMP_EXTENSION__", &omp_extension_content())
+        .replace("__HERMES_TAG__", HERMES_VERSION_TAG)
+        .replace("__HERMES_HOOK_REL_PATH__", HERMES_HOOK_REL_PATH)
+        .replace("__HERMES_HOOK__", &hermes_hook_content())
 }
 
 const INSTALL_TEMPLATE: &str = r##"set -e
@@ -84,6 +111,23 @@ if [ -d "$HOME/.omp/agent" ] && ! grep -qF '__OMP_TAG__' "$OMP_EXT" 2>/dev/null;
       cat > "$OMP_EXT" << 'AGENT_STATUS_OMP_EOF'
 __OMP_EXTENSION__
 AGENT_STATUS_OMP_EOF
+    } || true
+  fi
+fi
+
+# Hermes: its shell hooks find the pane themselves, so it gets a script of its
+# own. Written only where Hermes is set up, only when our copy is not current,
+# and never over a same-named file that is not ours. Registering it in
+# ~/.hermes/config.yaml stays a deliberate step (Hermes asks for consent).
+HERMES_HOOK="$HOME/__HERMES_HOOK_REL_PATH__"
+if [ -d "$HOME/.hermes" ] && ! grep -qF '__HERMES_TAG__' "$HERMES_HOOK" 2>/dev/null; then
+  if [ ! -e "$HERMES_HOOK" ] || grep -qF 'zellij-agent-status' "$HERMES_HOOK" 2>/dev/null; then
+    {
+      mkdir -p "$(dirname "$HERMES_HOOK")" &&
+      cat > "$HERMES_HOOK" << 'AGENT_STATUS_HERMES_EOF' &&
+__HERMES_HOOK__
+AGENT_STATUS_HERMES_EOF
+      chmod +x "$HERMES_HOOK"
     } || true
   fi
 fi
@@ -229,6 +273,9 @@ mod tests {
         assert!(sh.contains(OMP_VERSION_TAG));
         assert!(sh.contains("tool_approval_requested"));
         assert!(!sh.contains("__OMP_"));
+        assert!(sh.contains(HERMES_VERSION_TAG));
+        assert!(sh.contains("on_human_input_request"));
+        assert!(!sh.contains("__HERMES_"));
         assert!(!sh.contains("__HOOK_SCRIPT__"));
         assert!(!sh.contains("__VERSION_TAG__"));
     }
@@ -396,6 +443,97 @@ mod tests {
             fs::read_to_string(&ext).unwrap(),
             "export default () => {};\n"
         );
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn hermes_hook_tag_follows_the_shebang() {
+        let body = hermes_hook_content();
+        let mut lines = body.lines();
+        assert_eq!(lines.next(), Some("#!/bin/sh"));
+        assert_eq!(lines.next(), Some(HERMES_VERSION_TAG));
+        assert!(body.contains("terminal-sessions"));
+        assert!(body.contains("7501"));
+        assert!(body.contains("agent-status-hook.sh"));
+    }
+
+    #[test]
+    fn writes_the_hermes_hook_only_where_hermes_is_set_up() {
+        let without = unique_home();
+        run_install(&without);
+        assert!(!without.join(".hermes").exists());
+        fs::remove_dir_all(&without).ok();
+
+        let home = unique_home();
+        fs::create_dir_all(home.join(".hermes")).unwrap();
+        run_install(&home);
+        let hook = home.join(HERMES_HOOK_REL_PATH);
+        let body = fs::read_to_string(&hook).unwrap();
+        assert!(body.contains(HERMES_VERSION_TAG));
+        assert!(fs::metadata(&hook).unwrap().permissions().mode() & 0o111 != 0);
+
+        // Current copy is left alone, an older one is replaced.
+        let before = fs::metadata(&hook).unwrap().modified().unwrap();
+        run_install(&home);
+        assert_eq!(fs::metadata(&hook).unwrap().modified().unwrap(), before);
+        fs::write(&hook, "#!/bin/sh\n# zellij-agent-status v0.0.0 (hermes)\n").unwrap();
+        run_install(&home);
+        assert!(fs::read_to_string(&hook)
+            .unwrap()
+            .contains(HERMES_VERSION_TAG));
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn leaves_a_foreign_hermes_hook_alone() {
+        let home = unique_home();
+        let hook = home.join(HERMES_HOOK_REL_PATH);
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(&hook, "#!/bin/sh\necho mine\n").unwrap();
+        run_install(&home);
+        assert_eq!(fs::read_to_string(&hook).unwrap(), "#!/bin/sh\necho mine\n");
+        fs::remove_dir_all(&home).ok();
+    }
+
+    /// The script maps Hermes events to states and stays silent without a pane.
+    #[test]
+    fn hermes_hook_is_silent_outside_a_pane() {
+        if !jq_available() {
+            return;
+        }
+        let home = unique_home();
+        let script = home.join("hermes.sh");
+        fs::write(&script, hermes_hook_content()).unwrap();
+        for event in [
+            "pre_llm_call",
+            "on_human_input_request",
+            "on_session_end",
+            "nonsense",
+        ] {
+            let mut child = Command::new("sh")
+                .arg(&script)
+                .env("HOME", &home)
+                .env("HERMES_HOME", home.join(".hermes"))
+                .env("XDG_RUNTIME_DIR", &home)
+                .env_remove("ZELLIJ")
+                .env_remove("ZELLIJ_PANE_ID")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            use std::io::Write;
+            let payload =
+                format!(r#"{{"hook_event_name":"{event}","session_id":"s1","extra":{{}}}}"#);
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success(), "{event}");
+            assert!(out.stdout.is_empty(), "{event} printed to stdout");
+        }
         fs::remove_dir_all(&home).ok();
     }
 }

@@ -61,6 +61,10 @@ the tab does not stick on ✅. `SessionEnd` also sends `end`.
 `~/.omp/agent/extensions/agent-status.ts`. Restart omp to load it. See
 "omp" below.
 
+Where `~/.hermes` exists it writes a Hermes shell hook to
+`~/.hermes/agent-hooks/zellij-agent-status.sh`, which you register once in
+Hermes' config. See "Hermes" below.
+
 Optional jump key, inside `shared_except "locked"`:
 
 ```kdl
@@ -143,6 +147,45 @@ the hook script and rewritten by a newer plugin; a same-named file that is
 not ours is left alone. Only omp's default profile is covered: for
 `omp --profile <name>`, copy the file into
 `~/.omp/profiles/<name>/agent/extensions/`.
+
+### Hermes
+
+Where `~/.hermes` exists, first load writes a Hermes shell hook to
+`~/.hermes/agent-hooks/zellij-agent-status.sh`. Hermes only runs hooks listed
+in its config and asks before running a new one, so registering it is one
+deliberate step:
+
+```yaml
+# ~/.hermes/config.yaml
+hooks:
+  pre_llm_call:            [{command: "~/.hermes/agent-hooks/zellij-agent-status.sh", timeout: 5}]
+  on_human_input_request:  [{command: "~/.hermes/agent-hooks/zellij-agent-status.sh", timeout: 5}]
+  on_human_input_resolved: [{command: "~/.hermes/agent-hooks/zellij-agent-status.sh", timeout: 5}]
+  on_session_end:          [{command: "~/.hermes/agent-hooks/zellij-agent-status.sh", timeout: 5}]
+  on_session_finalize:     [{command: "~/.hermes/agent-hooks/zellij-agent-status.sh", timeout: 5}]
+```
+
+Then start `hermes` in a pane and approve the hooks at its prompt (or run it
+once with `--accept-hooks`).
+
+| Hermes event | State | Zellij inbox (OSC 7501) |
+|---|---|---|
+| `pre_llm_call` (a turn starts), `on_human_input_resolved` | `working` | `working` |
+| `on_human_input_request` (approval, `clarify` question, sudo) | `waiting` | `blocked`, kind `permission` / `question` / `auth` |
+| `on_session_end` (a turn ends) | `done` | `done`; `error` if it failed, `idle` if interrupted |
+| `on_session_finalize` (the session closes) | `end` | `clear` |
+
+Hermes usually runs its agent in a gateway process, outside the pane you
+type in, so the hook rarely has `ZELLIJ_PANE_ID`. It finds the pane through
+Hermes' terminal breadcrumb for the session
+(`~/.hermes/terminal-sessions/tty-*`, the tty the CLI runs on) and the
+Zellij variables of a process on that tty, then caches the answer in
+`$XDG_RUNTIME_DIR/zellij-agent-status/`. Sessions without a breadcrumb
+(subagents, cron, chat platforms) are skipped. Besides piping to the plugin,
+it writes one OSC 7501 sequence to the pane's tty, so Zellij 0.46's own
+inbox, tray badge and notifications see Hermes too;
+`AGENT_STATUS_OSC7501=0` turns that off. It never prints to stdout, so it
+cannot steer the agent.
 
 The hook is a no-op outside zellij. `timeout` and closed stdin mean a missing
 plugin can never hang the agent. By default the pipe carries no `--plugin`
